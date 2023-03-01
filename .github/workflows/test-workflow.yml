@@ -10,6 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Echo Hello World
-        run: echo "Hello World"
+      - name: Echo Hi
+        run: echo Hi
         
