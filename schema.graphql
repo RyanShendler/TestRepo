@@ -1,0 +1,1037 @@
+type Person {
+  email: String!
+  tense_userId: Int #this should be ConnectorData
+  name: String!
+  biography: String
+  githubAccount: String
+  active: Boolean!
+  userIconUrl: String
+  billingIntention: String #this should be ConnectorData
+  tense_title: String #this should be ConnectorData
+  tense_hoursPerWeek: Int #used for availability calculation
+  tense_sideHustleHours: Int #used for availability calculation
+  phone: String
+  google_workLocation: String
+  skills: [Skill!]! @relationship(type:"HAS_SKILL", properties:"HasSkill", direction:OUT)
+  certs: [Certification!]! @relationship(type: "ACQUIRED", properties:"Acquired", direction:OUT)
+  attended: [Education!]! @relationship(type: "ATTENDED", properties: "Attended", direction: OUT)
+  isAdmin: [Organization!]! @relationship(type: "IS_ADMIN", direction: OUT)
+  experience: [Experience!]! @relationship(type: "HAS_EXPERIENCE", properties: "HasExperience", direction: OUT)
+  nonJGProjects: [Project] @cypher(statement: """
+    MATCH (this)-[:HAS_EXPERIENCE]->(p:Project)
+    WHERE NOT p.name STARTS WITH 'JG -'
+    RETURN p
+  """)
+  availability: Int @cypher(statement: """
+    MATCH (this:Person)-[r:HAS_EXPERIENCE]->(p:Project)<-[:ORG_PROJECT]-(:Organization {name: "Jahnel Group"})
+    WHERE r.active = TRUE AND r.hoursPerWeek > 0 AND this.tense_hoursPerWeek > 0
+    WITH this, collect(r.hoursPerWeek) as allocations, COALESCE(this.tense_hoursPerWeek, 0) as weeklyAllo, COALESCE(this.tense_sideHustleHours, 0) as sideHustle
+    UNWIND allocations AS allo
+    RETURN TOINTEGER(weeklyAllo + sideHustle - SUM(allo))
+  """)
+  sideHustleAvailability: Int @cypher(statement: """
+  MATCH (this:Person)
+  OPTIONAL MATCH (this)-[r:WORKED_ON]->(p:Project)<-[:ORG_PROJECT]-(:Organization {name: "Jahnel Group"})
+  WHERE r.active = TRUE AND r.hoursPerWeek > 0 AND this.tense_hoursPerWeek > 0 AND r.isSideHustle = TRUE
+  WITH this, COALESCE(this.tense_sideHustleHours, 0) as sideHustle, SUM(r.hoursPerWeek) as alloSum
+  RETURN TOINTEGER(sideHustle - alloSum)
+  """)
+  completedAssessments: [AssessmentCompletion!]! @relationship(type: "COMPLETED", direction: OUT)
+  defaultOrgUid: String
+  invitation: [Invitation!]! @relationship(type: "INVITED", direction: OUT, properties: "InvitationProperties")
+  orgUnits: [OrgUnit!]! @relationship(type:"MEMBER_OF", direction: OUT, properties: "MemberOfProperties")
+  userBannerUrl: String
+  slackUsername: String
+  locationCity: String
+  locationState: String
+  locationZip: String
+  birthdate: String
+  personalWebsite: String
+  linkedIn: String
+  cognitoID: String
+  competencies: [Competency!]! @relationship(type: "HAS_COMPETENCY", direction: OUT)
+  announcements: [Announcement!]! @relationship(type: "HAS_ANNOUNCEMENT", direction: OUT, properties: "HasAnnouncementProperties")
+  profiles: [Profile!]!
+  hasExploreQueries: [ExploreQuery!]! @relationship(type: "HAS_EXPLORE_QUERY", direction: OUT)
+}
+
+scalar JSONObject
+
+type ProfileGeneratingResponse @exclude {
+  ownerID: String
+  profileID: String
+  fileName: String
+  templateID: String
+  profileData: JSONObject
+  profileStatus: String
+}
+
+type ProfileChange @exclude {
+  message: String
+  authorName: String
+  authorID: String
+  time: String
+}
+
+input ProfileChangeInput {
+  message: String
+  authorName: String
+  authorID: String
+  time: String
+}
+
+type Profile @exclude {
+  ownerID: String
+  profileID: String
+  profileStatus: String
+  profileError: String
+  version: String
+  fileName: String
+  templateID: String
+  template: Template!
+  profile: String
+  profileData: JSONObject
+  changes: [ProfileChange!]!
+}
+
+type ProfileDownloadLink @exclude {
+  downloadURL: String
+}
+
+type ProfileDownload @exclude {
+  profile: String
+}
+
+type Template @exclude {
+  templateID: String
+  templateName: String
+  version: String
+  template: String
+  exampleTemplate: String
+  templateConfig: JSONObject
+}
+
+type Organization {
+  uid: String!
+  name: String!
+  hasAdmin: [Person!]! @relationship(type: "IS_ADMIN", direction: IN)
+  photoURL: String!
+  timestamp: String!
+  motto: String!
+  orgUnit: [OrgUnit!]! @relationship(type: "BELONGS_TO", direction: IN)
+  assessment: [Assessment!]! @relationship(type:"USE_ASSESSMENT", direction: OUT)
+  announcements: [Announcement!]! @relationship(type: "ORG_ANNOUNCEMENT", direction: OUT)
+  taxonomy: Taxonomy @relationship(type: "ORG_TAXONOMY", direction: OUT)
+  orgProjects: [Project!]! @relationship(type: "ORG_PROJECT", direction: OUT)
+}
+
+type OrgUnit {
+  orgUnit_id: ID!
+  name: String!
+  logo: String
+  status: String
+  motto: String
+  locationCity: String
+  locationState: String
+  locationZip: String
+  website: String
+  memberCount: Int @cypher(statement: """
+  MATCH (this)<-[:MEMBER_OF]-(n:Person {active: true})
+  RETURN count(n)
+  """)
+  members: [Person!]! @relationship(type:"MEMBER_OF", direction: IN, properties: "MemberOfProperties")
+    organization: Organization @relationship(type: "BELONGS_TO", direction: OUT)
+}
+input DeleteOrgUnitInput {
+    email: String!
+    transfer: String!
+    inactivate: Boolean!
+}
+
+interface MemberOfProperties @relationshipProperties {
+    startDate: String
+    department: String
+    position: String
+}
+
+type Invitation {
+  invited: [Person!]! @relationship(type: "INVITED", direction: IN, properties: "InvitationProperties")
+}
+input InvitationCreateInput {
+  expired: Boolean!
+  orgUnitName: String!
+  email: String!
+}
+input DeleteInvitationInput {
+  email: String!
+  orgUnitName: String!
+}
+
+interface InvitationProperties @relationshipProperties {
+  dateInvited: String!
+  expired: Boolean!
+  orgUnitName: String!
+}
+
+interface Experience {
+  id: String!
+  name: String!
+  peopleWithExperience: [Person!]! @relationship(type: "HAS_EXPERIENCE", properties: "HasExperience", direction: IN)
+  assessments: [AssessmentCompletion!]! @relationship(type: "ASSESSMENT_FOR", direction: IN)
+}
+
+interface HasExperience @relationshipProperties {
+  active: Boolean!
+  totalHours: Float
+  role: String
+  startDate: String
+  endDate: String
+  hoursPerWeek: Float
+  isSideHustle: Boolean
+}
+
+type Project implements Experience {
+  id: String!
+  name: String!
+  peopleWithExperience: [Person!]!
+  assessments: [AssessmentCompletion!]!
+  active: Boolean!
+  hyperlinks: [String!]!
+  description: String
+  startDate: String
+  endDate: String
+  company: String
+  industry: String
+  sector: String
+  location: String
+  organization: [Organization!]! @relationship(type: "ORG_PROJECT", direction: IN)
+}
+
+input SkillInput {
+  name:String!
+}
+input UpdateUserSkillRatingsInput {
+  personEmail: String!
+  skillName: String!
+  ratingValue: Int!
+}
+input CreateUserSkillRatingsInput {
+  skillName: String!
+  ratingValue: Int!
+}
+
+interface HasSkill @relationshipProperties{
+  rating: Int!
+}
+
+input CreateProjectSkillRatingsInput {
+  skillName: String!
+  ratingValue: Int!
+  userId: String
+}
+
+enum _SkillRatingDirection {
+    ASC
+    DESC
+}
+input SkillRatingSort{
+  totalPeopleRated: _SkillRatingDirection
+}
+
+interface UsesSkill @relationshipProperties{
+  rating: Int!
+}
+
+type Skill {
+  name: String!
+  id: String!
+  description: String!
+  slug: String
+  active: Boolean!
+  imageLink: String
+  websiteLink: String
+  dateAdded: String!
+  competencyRequirements: [Requirement!]! @relationship(type: "REQUIRES", properties: "Requires", direction: IN)
+  assessmentRating: [AssessmentCompletion!]! @relationship(type: "USES_SKILL", properties: "UsesSkill", direction: IN)
+  peopleWithSkill: [Person!]! @relationship(type:"HAS_SKILL", properties: "HasSkill", direction: IN)
+  category: [SkillTag!]! @relationship(type: "HAS_SKILL_TAG", properties:"HasSkillTag", direction: OUT)
+  totalPeopleRated: Int @cypher(statement: """
+    MATCH (p:Person) -[r:HAS_SKILL]-> (this)
+    RETURN count(r)
+  """)
+  inactivePeopleRated: Int @cypher(statement: """
+    MATCH (p:Person) -[r:HAS_SKILL]-> (this)
+    WHERE p.active=false
+    RETURN count(r)
+  """)
+}
+
+interface HasSkillTag @relationshipProperties{
+  active: Boolean
+}
+
+type SkillCategory {
+  name: String!
+  id: String!
+  competencyRequirements: [Requirement!]! @relationship(type: "REQUIRES", properties: "Requires", direction: IN)
+}
+
+type Taxonomy {
+  name: String!
+  id: String!
+  org: Organization @relationship(type: "ORG_TAXONOMY", direction: IN)
+}
+
+type SkillJSON @exclude {
+  name: String!
+  slug: String
+  description: String
+  websiteLink: String
+}
+
+type CategoryJSON @exclude {
+  name: String!
+}
+
+type EdgeJSON @exclude {
+  start: String!
+  end: String!
+}
+
+type TaxonomyJSON @exclude {
+  skills: [SkillJSON!]!
+  categories: [CategoryJSON!]!
+  edges: [EdgeJSON!]!
+}
+
+input ImportedSkill {
+  name: String!
+  slug: String
+  description: String!
+  websiteLink: String
+}
+
+input ImportedCategory {
+  name: String!
+}
+
+input ImportedEdge {
+  start: String!
+  end: String!
+}
+
+type SkillLike @exclude {
+  name: String!
+  id: String!
+  type: String
+  depth: Int
+  icon: String
+  parents: [String]
+}
+
+type Assessment {
+  assessmentId: String!
+  description: String!
+  link: String!
+  name: String!
+  org: [Organization!]! @relationship(type:"USE_ASSESSMENT", direction: IN)
+  completions: [AssessmentCompletion!]! @relationship(type: "COMPLETION_FOR", direction: IN)
+}
+
+type AssessmentCompletion {
+  dateCompleted: String!
+  description: String
+  personCompleted: [Person!]! @relationship(type: "COMPLETED", direction: IN)
+  assessment: [Assessment!]! @relationship(type: "COMPLETION_FOR", direction: OUT)
+  skills: [Skill!]! @relationship(type: "USES_SKILL", properties: "UsesSkill", direction: OUT)
+  experienceAssessed: [Experience!]! @relationship(type: "ASSESSMENT_FOR", direction: OUT)
+  competencyAssessed: [Competency!]! @relationship(type: "ASSESSMENT_FOR", direction: OUT)
+}
+
+input ProjectSkillAssessmentInput{
+  projectId: String!
+  dateCompleted: String!
+  completedBy: String!
+  projectDescription: String!
+}
+
+type Competency {
+    name: String!
+    id: String!
+    generalRequirements: [String!]!
+    composition: String!
+    peopleWithCompetency: [Person!]! @relationship(type: "HAS_COMPETENCY", direction: IN)
+    assessments: [AssessmentCompletion!]! @relationship(type: "ASSESSMENT_FOR", direction: IN)
+    requirements: [Requirement!]! @relationship(type: "REQUIREMENT_FOR", direction: IN)
+}
+
+interface Requires @relationshipProperties {
+    requirements: [String!]!
+}
+
+type Requirement {
+    type: String!
+    name: String!
+    id: String!
+    acceptanceCriteria: Int!
+    filters: String
+    requirementFor: [Competency!]! @relationship(type: "REQUIREMENT_FOR", direction: OUT)
+    requiredSkills: [Skill!]! @relationship(type: "REQUIRES", properties: "Requires", direction: OUT)
+    requiredCerts: [Certification!]! @relationship(type: "REQUIRES", properties: "Requires", direction: OUT)
+    requiredCategories: [SkillCategory!]! @relationship(type: "REQUIRES", properties: "Requires", direction: OUT)
+}
+
+enum _SkillTagDirection {
+    ASC
+    DESC
+}
+input SkillTagSort{
+  value: _SkillTagDirection
+}
+type SkillTag {
+  type: String!
+  value: String!
+  icon: String
+  description: String
+  skills: [Skill!]! @relationship(type: "HAS_SKILL_TAG",properties:"HasSkillTag", direction: IN)
+}
+
+interface Acquired @relationshipProperties{
+  acquiredDate: String
+}
+type Certification {
+  name: String!
+  description: String
+  logo: String
+  category: String
+  cost: String
+  level: String
+  expires_after: String
+  websiteLink: String
+  competencyRequirements: [Requirement!]! @relationship(type: "REQUIRES", properties: "Requires", direction: IN)
+  peopleWithCert: [Person!]! @relationship(type: "ACQUIRED", properties:"Acquired", direction:IN)
+  bounty: [Bounty!]! @relationship(type: "HAS_BOUNTY", direction:OUT)
+  totalPeopleAcquired: Int @cypher(statement: """
+    MATCH (p:Person) -[r:ACQUIRED]-> (this)
+    RETURN count(r)
+  """)
+}
+type Bounty{
+  reward : String
+}
+type Education {
+  educationName: String
+  attendedBy: [Person!]! @relationship(type: "ATTENDED", properties: "Attended", direction: IN)
+}
+interface Attended @relationshipProperties{
+  id: ID! @id(autogenerate: true)
+  startDate: String!
+  endDate: String!
+  degreeName: String!
+  majorName: String
+}
+input EducationInput {
+  id: ID
+  email: String!
+  educationName: String
+  startDate: String
+  endDate: String
+  degreeName: String
+  majorName: String
+}
+
+type Connector{
+    connectorName: String
+    createDate: String
+    enabled : Boolean
+    jobCadence: String
+    keepJobCount: Int
+    jobs: [ScheduledJob!]! @relationship(type:"JOB_RUN", properties: "JobRun", direction: OUT)
+}
+
+type ScheduledJob {
+  authStatus: String
+  authLogs: [String]
+  queryStatus: String
+  queryLogs: [String]
+  mappingStatus: String
+  mappingLogs: [String]
+  linkingStatus: String
+  linkingLogs: [String]
+  connectors: [Connector!]! @relationship(type:"JOB_RUN", properties: "JobRun", direction: IN)
+}
+
+interface JobRun @relationshipProperties{
+  runDateTime: String!
+}
+
+
+input ProfileWhere {
+  profileID: String
+  ownerID: String
+}
+
+input TemplateWhere {
+  templateID: String
+}
+type Announcement {
+  announcementId: String!
+  title: String!
+  description: String!
+  content: String!
+  draft: Boolean!
+  active: Boolean!
+  expiration: String!
+  organization: [Organization!]! @relationship(type: "ORG_ANNOUNCEMENT", direction: IN)
+  belongsTo: [Person!]! @relationship(type: "HAS_ANNOUNCEMENT", direction: IN, properties: "HasAnnouncementProperties")
+}
+
+interface HasAnnouncementProperties @relationshipProperties {
+  datePosted: String!
+}
+
+type Explore {
+  id: String!
+  name: String!
+  description: String!
+}
+
+type ExploreQuery {
+  id: String!
+  query: String!
+  results: String!
+  dateCreated: String!
+  belongsTo: [Person!]! @relationship(type: "HAS_EXPLORE_QUERY", direction: IN)
+}
+
+# INCLUDE IDS IN YOUR SCHEMA
+type Query {
+  # Profile Generation
+  profile(where: ProfileWhere): Profile!
+  templates: [Template!]!
+  template(where: TemplateWhere): Template!
+  getProfileDownloadLink(where: ProfileWhere): ProfileDownloadLink!
+  downloadProfile(where: ProfileWhere): ProfileDownload!
+
+  getUnratedSkills(personEmail: String!):[Skill]! @cypher(statement: """
+    MATCH (s:Skill),(p:Person{email: $personEmail})
+    WHERE NOT (p)-[:HAS_SKILL]->(s)
+    RETURN s,p
+    """
+  )
+
+  getUnratedSkillsNoUser(personEmail: String!):[Skill]! @cypher(statement: """
+    MATCH (s:Skill {active: true}),(p:Person{email: $personEmail})
+    WHERE NOT (p)-[:HAS_SKILL]->(s)
+    RETURN s
+    ORDER BY toLower(s.name)
+    """
+  )
+
+  getSkillsForProject(projectId: Int!):[Skill]! @cypher(statement: """
+    MATCH(p:Project{projectId:toString($projectId)})-[r:USES_SKILL]->(s:Skill)
+    RETURN s
+    """
+    )
+
+  getProjectById(projectId: Int!):[Project] @cypher(statement: """
+    MATCH(p:Project{projectId:toString($projectId)})
+    RETURN p
+  """
+  )
+  getOrgTaxonomy(orgUid: String!): [SkillLike!]! @cypher(statement: """
+    MATCH (:Organization {uid: $orgUid})-[:ORG_TAXONOMY]->(t:Taxonomy)
+    MATCH p = (t)<-[:SUB_CLASS_OF*0..]-(k)
+    WITH DISTINCT k, max(length(p)) as depth
+    OPTIONAL MATCH (k)-[:SUB_CLASS_OF]->(p)
+    WITH k, depth, collect(DISTINCT p.id) as parents
+    RETURN {name: k.name, id: k.id, parents: parents, type: labels(k)[0], depth: depth, icon: CASE WHEN k:Skill THEN k.imageLink ELSE null END}
+    """)
+
+  getUnattachedSkills: [Skill!]!
+    @cypher(
+      statement: """
+      MATCH (n:Skill)
+      WHERE NOT EXISTS((n)-[:SUB_CLASS_OF]->())
+      RETURN n
+      """
+    )
+
+  getParentNodes(childID: String!): [SkillLike!]! 
+    @cypher(
+      statement: """
+        MATCH (c {id: $childID})-[:SUB_CLASS_OF]->(p)
+        RETURN {name: p.name, id: p.id}
+      """
+    )
+
+  exportTaxonomy(orgUid: String!): TaxonomyJSON!
+    @cypher(
+      statement: """
+      MATCH (t:Taxonomy)<-[:ORG_TAXONOMY]-(:Organization {uid: $orgUid})
+      OPTIONAL MATCH (t)<-[:SUB_CLASS_OF*1..]-(s:Skill) 
+      OPTIONAL MATCH (s)-[:SUB_CLASS_OF]->(p) 
+      WITH t, 
+      collect(DISTINCT CASE WHEN s IS NULL THEN NULL ELSE {name: s.name, slug: s.slug, description: s.description, websiteLink: s.websiteLink} END) as skills, 
+      collect(DISTINCT CASE WHEN s IS NULL THEN NULL ELSE {start: s.name, end: p.name} END) as skillEdges 
+      OPTIONAL MATCH (t)<-[:SUB_CLASS_OF*1..]-(c:SkillCategory) 
+      OPTIONAL MATCH (c)-[:SUB_CLASS_OF]->(p) 
+      WITH skills, skillEdges, 
+      collect(DISTINCT CASE WHEN c IS NULL THEN NULL ELSE {name: c.name} END) as categories, 
+      collect(DISTINCT CASE WHEN c IS NULL THEN NULL ELSE {start: c.name, end: p.name} END) as categoryEdges 
+      RETURN {skills: skills, categories: categories, edges: skillEdges + categoryEdges}
+      """
+    )
+
+  getCreatedSkills(skills: [ImportedSkill!]!): [String!]!
+    @cypher(
+      statement: """
+      UNWIND CASE WHEN $skills = [] THEN [NULL] ELSE $skills END as skill
+      OPTIONAL MATCH (s:Skill {name: skill.name})
+      WITH collect(CASE WHEN s IS NULL THEN skill.name ELSE NULL END) as created
+      RETURN created
+      """
+    )
+
+  getTaxonomySubtree(rootID: String!): [SkillLike!]!
+    @cypher(
+      statement: """
+      MATCH p = (s:SkillCategory {id: $rootID})<-[:SUB_CLASS_OF*0..]-(k)
+      WITH DISTINCT k, s, max(length(p)) as depth
+      OPTIONAL MATCH (k)-[:SUB_CLASS_OF]->(p)
+      WHERE exists((p)-[:SUB_CLASS_OF*0..]->(s))
+      WITH k, depth, collect(DISTINCT p.id) as parents
+      RETURN {name: k.name, id: k.id, parents: parents, type: labels(k)[0], depth: depth, icon: CASE WHEN k:Skill THEN k.imageLink ELSE null END}
+      """
+    )
+
+  getSkillPath(skillID: String!): [SkillLike!]!
+    @cypher(
+      statement: """
+      MATCH p = (t:Taxonomy)<-[:SUB_CLASS_OF*1..]-(:Skill {id: $skillID})
+      WITH t, nodes(p) as nodes
+      UNWIND nodes as n
+      WITH DISTINCT t, n
+      MATCH p = (t)<-[:SUB_CLASS_OF*0..]-(n) 
+      WITH n, max(length(p)) as depth
+      OPTIONAL MATCH (n)-[:SUB_CLASS_OF]->(p)
+      WITH n, depth, collect(DISTINCT p.id) as parents
+      RETURN {name: n.name, id: n.id, parents: parents, type: labels(n)[0], depth: depth, icon: CASE WHEN n:Skill THEN n.imageLink ELSE null END}
+      """
+    )
+}
+
+input ProfileUpsertInput {
+  ownerID: String
+  templateID: String
+  fileName: String
+  profileData: JSONObject
+  change: ProfileChangeInput
+}
+
+input ProfileMutationWhere {
+  ownerID: String
+  profileID: String
+}
+
+type Mutation {
+  # Profile Generation
+  createProfile(input: ProfileUpsertInput): ProfileGeneratingResponse!
+  updateProfile(where: ProfileMutationWhere, input: ProfileUpsertInput): ProfileGeneratingResponse!
+  deleteProfile(where: ProfileMutationWhere): String!
+
+  mergePerson(email: String!, active: Boolean!, name: String, userIconUrl: String, biography: String): Person @cypher(statement: """
+  MERGE (p:Person {email:$email})
+  ON CREATE SET p.name = '', p.email=$email, p.active = $active, p.userIconUrl = '', p.biography = ''
+  ON MATCH SET p.email=$email, p.active = $active
+  RETURN p
+  """)
+
+  updateUserSkillRatings(input:[UpdateUserSkillRatingsInput!]!):Person @cypher(statement: """
+    UNWIND $input AS updated
+    MATCH (p:Person{email:updated.personEmail})-[r:HAS_SKILL]->(s:Skill{name:updated.skillName})
+    SET r.rating = updated.ratingValue
+    RETURN p, r, s
+    """
+  )
+  createNewAcquiredRelationship(
+   personEmail: String!,
+   certName: String!,
+   acquiredDate: String!,
+   ):Person
+  @cypher(
+    statement:"""
+      MATCH (p:Person)
+      WHERE p.email= $personEmail
+      MATCH (c:Certification)
+      WHERE c.name = $certName
+      MERGE (p)-[r:ACQUIRED]->(c)
+      SET r.acquiredDate=$acquiredDate
+      RETURN p,r,c
+    """
+    )
+  createNewSkillRelationship(
+    personEmail: String!,
+    skillName: String!,
+    ratingValue: Int!
+  ):Person
+  @cypher(
+    statement:"""
+      MATCH (p:Person)
+      WHERE p.email = $personEmail
+      MATCH (s:Skill)
+      WHERE s.name = $skillName
+      CREATE (p)-[r:HAS_SKILL{rating:$ratingValue}]->(s)
+      RETURN p,r,s
+    """
+    )
+
+  createUserSkillRatings(email: String!, input:[CreateUserSkillRatingsInput!]!):Person
+  @cypher(statement: """
+    MATCH (p:Person {email: $email})
+    with p
+    UNWIND $input AS updated
+    MATCH (s:Skill {name: updated.skillName})
+    MERGE (p)-[r:HAS_SKILL]->(s)
+      ON MATCH
+    SET r.rating=updated.ratingValue
+      ON CREATE
+    SET r.rating=updated.ratingValue
+    WITH p,collect(updated.skillName) as currentSkills
+    match (p)-[h:HAS_SKILL]->(s:Skill)
+    where not s.name in currentSkills
+    delete h
+    RETURN p,h,s
+    """
+  )
+
+  deleteUserSkills(email: String!):Person
+  @cypher(statement: """
+  MATCH (p:Person {email:$email})-[h:HAS_SKILL]->(s:Skill)
+  DELETE h
+  RETURN p
+  """
+  )
+  deleteUserAcquired(email: String!, certName: String!):Person
+  @cypher(statement: """
+  MATCH (p:Person {email:$email})-[h:ACQUIRED]->(c:Certification{name:$certName})
+  DELETE h
+  RETURN p
+  """
+  )
+  removeUserSkillRatings(email: String!, input:[SkillInput!]!): Person
+  @cypher(statement: """
+  MATCH (p:Person {email: $email})-[h:HAS_SKILL]->(s:Skill)
+  UNWIND $input as deleted
+  MATCH (p)-[r:HAS_SKILL]->(s:Skill {name: deleted.name})
+  DELETE r
+  RETURN p
+  """)
+
+  addUserSkillRatings(email: String!, input:[CreateUserSkillRatingsInput!]!):Person
+  @cypher(statement: """
+    MATCH (p:Person {email: $email})
+    with p
+    UNWIND $input AS updated
+    MATCH (s:Skill {name: updated.skillName})
+    MERGE (p)-[r:HAS_SKILL]->(s)
+      ON MATCH
+    SET r.rating=updated.ratingValue
+      ON CREATE
+    SET r.rating=updated.ratingValue
+    RETURN p
+    """
+  )
+  addProjectSkillRatings(projectId: Int!, input:[CreateProjectSkillRatingsInput!]!):Project
+  @cypher(statement: """
+    MATCH (p:Project {projectId: toString($projectId)})
+    with p
+    UNWIND $input AS updated
+    MATCH (s:Skill {name: updated.skillName})
+    MERGE (p)-[r:USES_SKILL]->(s)
+      ON MATCH
+    SET r.rating=updated.ratingValue
+      ON CREATE
+    SET r.rating=updated.ratingValue
+    RETURN p
+    """
+  )
+
+  addProjectUserSkillRatings(id: String!, userId: String!, input:[CreateProjectSkillRatingsInput!]!): AssessmentCompletion
+  @cypher(statement: """
+    MATCH (k:Person {cognitoID: $userId})-[:COMPLETED]->(a:AssessmentCompletion)-[:ASSESSMENT_FOR]->(p:Project {id: $id})
+    WITH a
+    UNWIND $input AS updated
+    MATCH (s:Skill {name: updated.skillName})
+    MERGE (a)-[r:USES_SKILL]->(s)
+    ON MATCH
+      SET r.rating = updated.ratingValue
+    ON CREATE
+      SET r.rating = updated.ratingValue
+    WITH a, collect(updated.skillName) as currentSkills
+    MATCH (a)-[r:USES_SKILL]->(s:Skill)
+    WHERE NOT s.name IN currentSkills
+    DELETE r
+    RETURN a
+  """)
+
+   removeProjectSkillRatings(projectId: Int!, input:[SkillInput!]!): Project
+   @cypher(statement: """
+       MATCH (p:Project {projectId: toString($projectId)})-[u:USES_SKILL]->(s:Skill)
+       UNWIND $input as deleted
+       MATCH (p)-[r:USES_SKILL]->(s:Skill {name: deleted.name})
+       WHERE r.user is null
+       DELETE r
+       RETURN p
+   """)
+  removeProjectUserSkillRatings(projectId: Int!, userId: String!, input:[SkillInput!]!): Project
+  @cypher(statement: """
+      MATCH (p:Project {projectId: toString($projectId)})-[u:USES_SKILL]->(s:Skill)
+      UNWIND $input as deleted
+      MATCH (p)-[r:USES_SKILL]->(s:Skill {name: deleted.name})
+      WHERE r.user = $userId
+      DELETE r
+      RETURN p
+  """)
+
+  addUserSkillAssessment(email: String!, dateCompleted: String!): AssessmentCompletion
+  @cypher(statement: """
+    MATCH (p:Person {email: $email})
+    MATCH (a:Assessment {assessmentId: '3e68d66c-b91f-4519-a772-7a4880ae95f3'})
+    MERGE (p)-[:COMPLETED]->(v:AssessmentCompletion)-[:COMPLETION_FOR]->(a)
+    ON MATCH
+      SET v.dateCompleted = $dateCompleted, v.description = ''
+    ON CREATE
+      SET v.dateCompleted = $dateCompleted, v.description = ''
+    RETURN v
+  """) 
+
+  addProjectSkillAssessment(input: ProjectSkillAssessmentInput!): Project
+  @cypher(statement: """
+      MATCH (p:Project {id: $input.projectId})
+      MATCH (k:Person {cognitoID: $input.completedBy})
+      MATCH (s:Assessment {assessmentId: '1ad1fccc-d279-46a0-8980-1d91afd6ba67'})
+      MERGE (k)-[:COMPLETED]->(a:AssessmentCompletion)-[:ASSESSMENT_FOR]->(p)
+      ON MATCH
+        SET a.dateCompleted = $input.dateCompleted, a.description = $input.projectDescription
+      ON CREATE
+        SET a.dateCompleted = $input.dateCompleted, a.description = $input.projectDescription
+      CREATE (a)-[:COMPLETION_FOR]->(s)
+      RETURN p
+  """)
+
+   createEducation(input: EducationInput!): Education
+   @cypher(statement: """
+       MATCH (p:Person {email: input.email})
+       MERGE (e:Education {educationName: input.educationName})
+       CREATE (p)-[a:ATTENDED]->(e)
+       SET a.id = apoc.create.uuid(),
+           a.startDate = input.startDate,
+           a.endDate = input.endDate,
+           a.degreeName = input.degreeName,
+           a.majorName = input.majorName
+       RETURN e
+   """)
+
+   updateEducation(input: EducationInput!): Education
+   @cypher(statement: """
+       MATCH ()-[a:ATTENDED {id: input.id}]->()
+       DELETE a
+       WITH *
+       MATCH (p:Person {email: input.email})
+       MERGE (e:Education {educationName: input.educationName})
+       CREATE (p)-[at:ATTENDED]->(e)
+       SET at.id = input.id,
+           at.startDate = input.startDate,
+           at.endDate = input.endDate,
+           at.degreeName = input.degreeName,
+           at.majorName = input.majorName
+       RETURN e
+   """)
+
+   deleteEducation(id: String): Attended
+      @cypher(statement: """
+       MATCH ()-[a:ATTENDED {id: id}]->()
+       DELETE a
+   """)
+
+   removeOrgUnit(input: [DeleteOrgUnitInput!]!, orgId: ID!): String
+      @cypher(
+        statement: """
+        MATCH (org:OrgUnit {orgUnit_id: $orgId})
+        UNWIND $input as m
+        CALL apoc.do.when(m.inactivate,
+        'MATCH (org)<-[r:MEMBER_OF]-(p:Person {email: m.email})
+        SET p.active=false
+        DELETE r
+        RETURN r',
+        'MATCH (org)<-[r:MEMBER_OF]-(p:Person {email: m.email})
+        MATCH (o:OrgUnit {orgUnit_id: m.transfer})
+        CREATE (p)-[s:MEMBER_OF {position: r.position, startDate: r.startDate, department: r.department}]->(o)
+        DELETE r
+        RETURN r',
+        {m: m, org: org})
+        YIELD value
+        WITH org, org.name as orgName, count(*) as dummy
+        DETACH DELETE org
+        RETURN orgName
+        """
+      )
+
+    createUserInvitation(input: InvitationCreateInput!, dateInvited: String!): Invitation
+      @cypher(
+        statement: """
+        UNWIND $input as newInvitation
+        MATCH (p: Person {email: newInvitation.email})
+        MERGE (i: Invitation)
+        MERGE (p) -[r:INVITED {orgUnitName: newInvitation.orgUnitName, dateInvited: $dateInvited}]-> (i)
+          ON MATCH
+            SET
+            r.expired = newInvitation.expired,
+            r.orgUnitName = newInvitation.orgUnitName,
+            r.dateInvited = $dateInvited
+          ON CREATE
+            SET
+            r.expired = newInvitation.expired,
+            r.orgUnitName = newInvitation.orgUnitName,
+            r.dateInvited = $dateInvited
+        RETURN i
+        """
+      )
+
+    deleteInvitation(input: DeleteInvitationInput!): Invitation
+     @cypher(
+      statement: """
+      UNWIND $input as deleted
+      MATCH (p: Person {email: deleted.email}) -[r:INVITED {orgUnitName: deleted.orgUnitName}]-> (i: Invitation)
+      DETACH DELETE r, p
+      RETURN i
+      """
+     )
+    
+    attachNewSkill(parentID: String!, name: String!, slug: String!, active: Boolean!, imageLink: String!, websiteLink: String!, description: String!, dateAdded: String!): Skill
+      @cypher(
+        statement: """
+        MATCH (n {id: $parentID})
+        CREATE (n)<-[:SUB_CLASS_OF]-(s:Skill {name: $name, id: randomUUID(), slug: $slug, active: $active, imageLink: $imageLink, websiteLink: $websiteLink, description: $description, dateAdded: $dateAdded})
+        RETURN s
+        """
+      )
+    
+    attachNewSkillCategory(parentID: String!, name: String!): SkillCategory
+      @cypher(
+        statement: """
+        MATCH (n {id: $parentID})
+        CREATE (n)<-[:SUB_CLASS_OF]-(s:SkillCategory {name: $name, id: randomUUID()})
+        RETURN s
+        """
+      )
+
+    removeRelationship(childID: String, parentID: String!): String
+      @cypher(
+        statement: """
+          MATCH (c {id: $childID})-[r:SUB_CLASS_OF]->(p {id: $parentID})
+          DELETE r
+          RETURN null
+        """
+    )
+
+    attachExistingNode(parentID: String!, childID: String!): String
+      @cypher(
+        statement: """
+        MATCH (p {id: $parentID})
+        MATCH (s {id: $childID})
+        CREATE (p)<-[:SUB_CLASS_OF]-(s)
+        RETURN s.id
+        """
+      )
+    
+    deleteSkillCategory(nodeID: String!): Int
+      @cypher(
+        statement: """
+        MATCH (n:SkillCategory {id: $nodeID})
+        OPTIONAL MATCH (n)<-[:SUB_CLASS_OF*1..]-(k:SkillCategory)
+        DETACH DELETE k
+        WITH n, count(k) as deleted
+        DETACH DELETE n
+        RETURN deleted + 1
+        """
+      )
+
+    detachSkill(nodeID: String!): Skill
+      @cypher(
+        statement: """
+        MATCH (s:Skill {id: $nodeID})-[r:SUB_CLASS_OF]->()
+        DELETE r
+        WITH s, count(*) as dummy
+        RETURN s
+        """
+      )
+
+    replaceSkill(prevSkillID: String!, newSkillID: String!): Skill
+      @cypher(
+        statement: """
+        MATCH (k:Skill {id: $newSkillID})
+        MATCH (s:Skill {id: $prevSkillID})-[r:SUB_CLASS_OF]->(p)
+        DELETE r
+        CREATE (k)-[:SUB_CLASS_OF]->(p)
+        WITH k, count(*) as dummy
+        RETURN k
+        """
+      )
+
+    importTaxonomy(orgUid: String!, skills: [ImportedSkill!]!, categories: [ImportedCategory!]!, edges: [ImportedEdge!]!): Taxonomy
+      @cypher(
+        statement: """
+        MATCH (t:Taxonomy)<-[:ORG_TAXONOMY]-(:Organization {uid: $orgUid})
+        OPTIONAL MATCH (k:SkillCategory)-[:SUB_CLASS_OF*1..]->(t)
+        DETACH DELETE k
+        WITH t, count(*) as dummy
+        OPTIONAL MATCH (s:Skill)-[r:SUB_CLASS_OF]->(t)
+        DELETE r
+        WITH t, count(*) as dummy
+        CALL apoc.do.when(
+          $skills = [],
+          'RETURN t',
+          'UNWIND skills as skill
+          MERGE (s:Skill {name: skill.name})
+          ON CREATE SET s.id = randomUUID(), s.description = skill.description, s.slug = skill.slug, s.websiteLink = skill.websiteLink, s.active = true, s.imageLink = \"/SkillLogos/default.png\", s.dateAdded = apoc.temporal.format(date(), \"MM/dd/yyyy\")
+          CREATE (s)-[:TEMP_SUB_CLASS]->(t)
+          WITH t, count(*) as dummy
+          RETURN t',
+          {t: t, skills: $skills}
+        )
+        YIELD value      
+        WITH t, count(*) as dummy
+        CALL apoc.do.when(
+          $categories = [],
+          'RETURN t',
+          'UNWIND categories as category
+          CREATE (s:SkillCategory {name: category.name, id: randomUUID()})-[:TEMP_SUB_CLASS]->(t)
+          WITH t, count(*) as dummy
+          RETURN t',
+          {t: t, categories: $categories}
+        )
+        YIELD value
+        WITH t, count(*) as dummy
+        CALL apoc.do.when(
+          $edges = [],
+          'RETURN t',
+          'UNWIND edges as edge
+          MATCH (s {name: edge.start})-[:TEMP_SUB_CLASS]->(t)
+          MATCH (e {name: edge.end})-[:TEMP_SUB_CLASS*0..1]->(t)
+          WHERE s:Skill OR s:SkillCategory AND e:SkillCategory OR e:Taxonomy
+          CREATE (s)-[:SUB_CLASS_OF]->(e)
+          WITH t, count(*) as dummy
+          RETURN t',
+          {t: t, edges: $edges}
+        )
+        YIELD value
+        WITH t, count(*) as dummy
+        OPTIONAL MATCH ()-[r:TEMP_SUB_CLASS]->(t)
+        DELETE r
+        WITH t, count(*) as dummy
+        RETURN t
+        """
+      )
+}
